@@ -2,8 +2,8 @@ setwd("~/Documents/R/MouseSleepAnalysis/")
 library(tidyverse)
 library(readxl)
 library(pracma)
-data = read_excel("../sleep_frag.xlsx", skip = 1 )
-data_rest = read_excel("../rested.xlsx", skip = 1 )
+data = read_excel("sleep_frag.xlsx", skip = 1 )
+data_rest = read_excel("rested.xlsx", skip = 1 )
 
 data = drop_na(data)
 # data_rest = drop_na(data_rest)
@@ -24,10 +24,10 @@ cell = cells$undecided...11
 
 get_area = function(col){
   
-  my_min = min(cell)
-  cell_norm = cell - my_min
-  my_max = max(cell_norm)
-  col = cell_norm / my_max
+  my_min = min(col)
+  col = col - my_min
+  my_max = max(col)
+  col = col / my_max
   
   baseline = median(unlist(col))   # get median of all cell data
   variance = mad(unlist(col))      # measure of variance (adds 1.4826 factor)
@@ -99,22 +99,40 @@ get_area = function(col){
       
     )
     
-    cell_output = col
-    return(list(results, cell_output))
+    return(results)
   }
 }
 
+get_Fdelta = function(data){
+  print(data)
+  data = drop_na(data)
+  cells = select(data, -1)
+  Time = unname(unlist(data[,1]))
+  
+  helper = function(col){
+    my_min = min(col)
+    col = col - my_min
+    my_max = max(col)
+    col = col / my_max
+    
+    mean = mean(col)
+    col = (col - mean)/mean
+    return(col)
+  }
+  cell_out = apply(cells, 2, helper)
+  cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
+  cell_out = t(cell_out)
+}
+
+
 #results = apply(cells, 2, get_area)
-ans = apply(cells, 2, get_area)
+results = apply(cells, 2, get_area)
 #ans = get_area(cell)
-results = (ans[1])
 results = t(results)
 results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
 colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike", "longest_spike", "threshold", "mean_lin_coeff", "mean_exp_coeff")
 
-cell_out = as_tibble(ans[2])
-#cell_out = t(cell_out)
-cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
+cell_out = get_Fdelta(cells)
 
 # results_rested = apply(cells_rested, 2, get_area)
 # #results = get_area(cell)

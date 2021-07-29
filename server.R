@@ -103,6 +103,26 @@ shinyServer(function(input,output) {
     
   }
   
+  get_Fdelta = function(data){
+     data = drop_na(data)
+    cells = select(data, -1)
+    Time = unname(unlist(data[,1]))
+    
+    helper = function(col){
+    my_min = min(col)
+    col = col - my_min
+    my_max = max(col)
+    col = col / my_max
+    
+    mean = mean(col)
+    col = (col - mean)/mean
+    return(col)
+    }
+    cell_out = apply(cells, 2, helper)
+    cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
+    cell_out = t(cell_out)
+  }
+  
   get_spike_inx = function(col){
     #for creating a logical vector of where spikes are so that they can be displayed on plot
     
@@ -162,12 +182,19 @@ shinyServer(function(input,output) {
     #loop through the sheets
     for (i in 1:length(input$file$name)){
       #write each sheet to a csv file, save the name
-      trunc_name = substr(input$file$name, 1, nchar(input$file$name)-5)
-      fileName = paste(trunc_name,".csv",sep = "")
-      temp = get_results(read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE))
-      write.table(temp, fileName, sep = ',', row.names = F, col.names = T)
+      trunc_name = substr(input$file$name[i], 1, nchar(input$file$name)-5)
+      fileName1 = paste(trunc_name,"spike_stats.csv",sep = "_")
+      fileName2 = paste(trunc_name,"deltaF.csv",sep = "_")
+    
+      path = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
+      temp = get_results(path)
+      temp2 = get_Fdelta(path)
       
-      files = c(fileName,files)
+      write.table(temp, fileName1, sep = ',', row.names = F, col.names = T)
+      write.table(temp, fileName2, sep = ',', row.names = T, col.names = F)
+      
+      files = c(fileName1,files)
+      files = c(fileName2, files)
     }
     return(files)
   }
