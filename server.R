@@ -191,7 +191,7 @@ shinyServer(function(input,output) {
       temp2 = get_Fdelta(path)
       
       write.table(temp, fileName1, sep = ',', row.names = F, col.names = T)
-      write.table(temp, fileName2, sep = ',', row.names = T, col.names = F)
+      write.table(temp2, fileName2, sep = ',', row.names = T, col.names = F)
       
       files = c(fileName1,files)
       files = c(fileName2, files)

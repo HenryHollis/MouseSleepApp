@@ -104,7 +104,6 @@ get_area = function(col){
 }
 
 get_Fdelta = function(data){
-  print(data)
   data = drop_na(data)
   cells = select(data, -1)
   Time = unname(unlist(data[,1]))
