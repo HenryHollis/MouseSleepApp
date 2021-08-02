@@ -1,4 +1,5 @@
 library(shiny)
+library(reader)
 
 # use the below options code if you wish to increase the file input limit
 options(shiny.maxRequestSize = 30*1024^2)
@@ -38,13 +39,15 @@ shinyServer(function(input,output) {
       
       cum_area = 0
       if (length(ends)==0) {
-        return(c(0.0,0.0,0.0,0.0,input$thresholdFactor*variance+baseline, 0.0, 0.0))
+        return(c(0.0,0.0,0.0,0.0,0.0, 0.0,input$thresholdFactor*variance+baseline, 0.0, 0.0))
         
       }else{
         max_spike_area = 0.0
         longest_time = 0.0
         lin_coeff = c()
         exp_coeff = c()
+        all_falling_spike_duration = c()
+        all_rising_spike_duration = c()
         
         for(i in 1:length(ends)){                      # for every spike...
           time = Time[starts[i]:ends[i]]               # time interval for spike_i
@@ -60,7 +63,13 @@ shinyServer(function(input,output) {
           
           falling_spike_times = Time[max_spike_idx:ends[i]]               # spike time-interval, times when spike is declining
           falling_spike_vals = col[max_spike_idx:ends[i]]  # values of spike as it's declining
+          rising_spike_times = Time[starts[i]:max_spike_idx]
           
+          rising_spike_duration = range(rising_spike_times)[2] - range(rising_spike_times)[1]
+          falling_spike_duration = range(falling_spike_times)[2] - range(falling_spike_times)[1]
+          all_falling_spike_duration = cbind(all_falling_spike_duration, falling_spike_duration)
+          all_rising_spike_duration = cbind(all_rising_spike_duration, rising_spike_duration)
+        
           lm_result = lm(falling_spike_vals ~ falling_spike_times)        #run linear regression
           
           exp_result = lm(log(falling_spike_vals) ~ falling_spike_times)  #run "exp regression"
@@ -78,6 +87,8 @@ shinyServer(function(input,output) {
         }
         mean_lin_coeff = mean(lin_coeff, na.rm=TRUE)
         mean_exp_coeff = mean(exp_coeff, na.rm=TRUE)
+        mean_rising_spike_duration = mean(all_rising_spike_duration, na.rm = T)
+        mean_falling_spike_duration = mean(all_falling_spike_duration, na.rm = T)
         
         
         results = c(  
@@ -85,6 +96,8 @@ shinyServer(function(input,output) {
           length(ends),                                 # number of spikes
           max_spike_area,                               # max_spike_area
           longest_time,                                 # longest time
+          mean_rising_spike_duration,
+          mean_falling_spike_duration,
           input$thresholdFactor*variance+baseline,      # threshold
           mean_exp_coeff,                               # average coeff from exp linear regression
           mean_lin_coeff                                # avg coeff from simple linear regression
@@ -97,26 +110,26 @@ shinyServer(function(input,output) {
     results = apply(cells, 2, get_area)
     results = t(results)
     results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
-    colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike", "longest_spike", "threshold", "mean_lin_coeff", "mean_exp_coeff")
+    colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold",  "mean_lin_coeff", "mean_exp_coeff")
     
     return(as_tibble(results))
     
   }
   
   get_Fdelta = function(data){
-     data = drop_na(data)
+    data = drop_na(data)
     cells = select(data, -1)
     Time = unname(unlist(data[,1]))
     
     helper = function(col){
-    my_min = min(col)
-    col = col - my_min
-    my_max = max(col)
-    col = col / my_max
-    
-    mean = mean(col)
-    col = (col - mean)/mean
-    return(col)
+      my_min = min(col)
+      col = col - my_min
+      my_max = max(col)
+      col = col / my_max
+      
+      mean = mean(col)
+      col = (col - mean)/mean
+      return(col)
     }
     cell_out = apply(cells, 2, helper)
     cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
@@ -182,13 +195,14 @@ shinyServer(function(input,output) {
     #loop through the sheets
     for (i in 1:length(input$file$name)){
       #write each sheet to a csv file, save the name
-      trunc_name = substr(input$file$name[i], 1, nchar(input$file$name)-5)
+      #trunc_name = substr(input$file$name[i], 1, nchar(input$file$name)-5)
+      trunc_name = rmv.ext(input$file$name[i])
       fileName1 = paste(trunc_name,"spike_stats.csv",sep = "_")
       fileName2 = paste(trunc_name,"deltaF.csv",sep = "_")
-    
+      
       path = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
       temp = get_results(path)
-      temp2 = get_Fdelta(path)
+      temp2 = t(get_Fdelta(path))
       
       write.table(temp, fileName1, sep = ',', row.names = F, col.names = T)
       write.table(temp2, fileName2, sep = ',', row.names = T, col.names = F)

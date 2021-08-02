@@ -1,9 +1,9 @@
-setwd("~/Documents/R/MouseSleepAnalysis/")
+setwd("~/Documents/R/MouseSleep/")
 library(tidyverse)
 library(readxl)
 library(pracma)
-data = read_excel("sleep_frag.xlsx", skip = 1 )
-data_rest = read_excel("rested.xlsx", skip = 1 )
+#data = read_excel("sleep_frag.xlsx", skip = 1 )
+data = read_excel("rested.xlsx", skip = 1 )
 
 data = drop_na(data)
 # data_rest = drop_na(data_rest)
@@ -12,15 +12,15 @@ data = drop_na(data)
 # data_rest[,-1] = data_rest[,-1]-min(data_rest[,-1])
 
 Time = unname(unlist(data[,1]))
-Time = unname(unlist(data_rest[,1]))
+#Time = unname(unlist(data_rest[,1]))
 
 thresholdFactor = 1
 
 
 cells = select(data, -1)
-cells_rested = select(data_rest, -1)
+#cells_rested = select(data_rest, -1)
 
-cell = cells$undecided...11
+#cell = cells$undecided...11
 
 get_area = function(col){
   
@@ -46,13 +46,16 @@ get_area = function(col){
   
   cum_area = 0
   if (length(ends)==0) {
-    return(c(0.0,0.0,0.0,0.0,3*baseline, 0.0, 0.0))
+    return(c(0.0,0.0,0.0,0.0,0.0, 0.0,thresholdFactor*variance+baseline, 0.0, 0.0))
     
   }else{
     max_spike_area = 0.0
     longest_time = 0.0
     lin_coeff = c()
     exp_coeff = c()
+    all_falling_spike_duration = c()
+    all_rising_spike_duration = c()
+    
     for(i in 1:length(ends)){                              # for every spike...
       time = Time[starts[i]:ends[i]]                       # time interval for spike_i
       if (Time[ends[i]]-Time[starts[i]] > longest_time){   # identify longest spike-time interval
@@ -67,6 +70,11 @@ get_area = function(col){
       
       falling_spike_times = Time[max_spike_idx:ends[i]]         # spike time-interval, this is point in time of maximal value
       falling_spike_vals = col[max_spike_idx:ends[i]]
+      rising_spike_times = Time[starts[i]:max_spike_idx]
+      rising_spike_duration = range(rising_spike_times)[2] - range(rising_spike_times)[1]
+      falling_spike_duration = range(falling_spike_times)[2] - range(falling_spike_times)[1]
+      all_falling_spike_duration = cbind(all_falling_spike_duration, falling_spike_duration)
+      all_rising_spike_duration = cbind(all_rising_spike_duration, rising_spike_duration)
       
       
       lm_result = lm(falling_spike_vals ~ falling_spike_times)             # run linear regression
@@ -87,13 +95,17 @@ get_area = function(col){
     }
     mean_lin_coeff = mean(lin_coeff, na.rm=TRUE)
     mean_exp_coeff = mean(exp_coeff, na.rm=TRUE)
+    mean_rising_spike_duration = mean(all_rising_spike_duration, na.rm = T)
+    mean_falling_spike_duration = mean(all_falling_spike_duration, na.rm = T)
     
     results = c(  
       cum_area/length(ends), # average spike area
       length(ends),          # number of spikes
       max_spike_area,        # max_spike_area
       longest_time,          # longest time
-      3*baseline,             # threshold
+      mean_rising_spike_duration,
+      mean_falling_spike_duration,
+      thresholdFactor*variance+baseline,             # threshold
       mean_lin_coeff,
       mean_exp_coeff
       
@@ -120,7 +132,7 @@ get_Fdelta = function(data){
   }
   cell_out = apply(cells, 2, helper)
   cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
-  cell_out = t(cell_out)
+  #cell_out = t(cell_out)
 }
 
 
@@ -129,15 +141,14 @@ results = apply(cells, 2, get_area)
 #ans = get_area(cell)
 results = t(results)
 results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
-colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike", "longest_spike", "threshold", "mean_lin_coeff", "mean_exp_coeff")
 
 cell_out = get_Fdelta(cells)
 
-# results_rested = apply(cells_rested, 2, get_area)
-# #results = get_area(cell)
-# results_rested = t(results_rested)
-# results_rested = as_tibble(results_rested) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
-# colnames(results_rested) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike", "longest_spike", "threshold", "mean_lin_coeff", "mean_exp_coeff")
+results = apply(cells, 2, get_area)
+#results = get_area(cell)
+results = t(results)
+results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
+colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike_area", "longest_spike", "threshold", "mean_lin_coeff", "mean_exp_coeff", "mean_rising_spike_duration", "mean_falling_spike_duration")
 
 
 

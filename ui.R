@@ -17,7 +17,7 @@ shinyUI(fluidPage(
             tags$hr(),
             sliderInput("num", "Cell to plot:",min = 2, max = 400, step=1,value=c(2)),
             tags$hr(),
-            sliderInput("thresholdFactor", "Scale Threshold:",min = 0, max = 3, step=.05, value=c(1)),
+            sliderInput("thresholdFactor", "Scale Threshold:",min = 0, max = 10, step=.05, value=c(1)),
             tags$hr(),
             sliderInput("lengthCutoff", "Minimum time units of spike:",min = 0, max = 100, step=1,value=c(10)),
             tags$hr(),
