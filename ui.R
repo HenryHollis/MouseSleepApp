@@ -2,6 +2,8 @@ library(shiny)
 library(tidyverse)
 library(readxl)
 library(pracma)
+library(reader)
+
 
 shinyUI(fluidPage(
     titlePanel("Upload xlsx files"),

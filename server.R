@@ -1,5 +1,4 @@
 library(shiny)
-library(reader)
 
 # use the below options code if you wish to increase the file input limit
 options(shiny.maxRequestSize = 30*1024^2)
