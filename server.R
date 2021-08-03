@@ -190,9 +190,10 @@ shinyServer(function(input,output) {
   #run the get_results function on all the files uploaded for downloading later....
   run_all = function(){
     files = NULL;
-    
+    withProgress(message = 'Processing Files', value = 0, {
     #loop through the sheets
-    for (i in 1:length(input$file$name)){
+    len = length(input$file$name)
+    for (i in 1:len){
       #write each sheet to a csv file, save the name
       #trunc_name = substr(input$file$name[i], 1, nchar(input$file$name)-5)
       trunc_name = rmv.ext(input$file$name[i])
@@ -208,7 +209,10 @@ shinyServer(function(input,output) {
       
       files = c(fileName1,files)
       files = c(fileName2, files)
+      incProgress(1/len, detail = paste("Processing file", i))
+      
     }
+  })
     return(files)
   }
   
@@ -284,7 +288,9 @@ shinyServer(function(input,output) {
       files = run_all()
       
       #create the zip file
+      withProgress(message = 'Zipping files', value = .5, {
       zip(file,files)
+      })
     }
   )
   
