@@ -7,5 +7,10 @@ if (any(installed_packages == FALSE)) {
   install.packages(packages[!installed_packages])
 }
 
+install.packages("broom", type = "binary")
+
 # Packages loading
 invisible(lapply(packages, library, character.only = TRUE))
+
+path = ""
+runApp(path)
