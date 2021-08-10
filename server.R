@@ -3,28 +3,64 @@ library(shiny)
 # use the below options code if you wish to increase the file input limit
 options(shiny.maxRequestSize = 30*1024^2)
 
-shinyServer(function(input,output) {
+shinyServer(function(input,output, session) {
+  
+  
+  gather_accross_files = function(){
+    # we want to get cell statistics across ALL the files uploaded...
+    len = length(input$file$name)
+    data =  read_excel(path = input$file$datapath[1], skip = 1, trim_ws = TRUE)
+    ncols = length(data)
+    updateSliderInput(session, "num", max = ncols-1)
+    n = dim(data)[1]
+    data = data[1:(n-3),-1]  #last three rows of data are always throwaways
+    data = drop_na(data)
+    if (len > 1){
+      for (i in 2:len){
+        local_data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
+        validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))
+        ncols = length(local_data)
+        local_data = local_data[,-1]
+        local_data = drop_na(local_data)
+        rbind(data, local_data)
+      }
+    }
+    
+    cell_mins = apply(data, 2, min)
+
+    data = mapply("-", data, cell_mins )
+    data = as.data.frame(data)
+    cell_maxs = apply(data, 2, max)
+   
+    data = mapply("/", data, cell_maxs)
+    
+    cell_baseline = apply(data, 2, median)
+    cell_variance = apply(data, 2, mad)
+
+    return(rbind(cell_mins, cell_maxs, cell_baseline, cell_variance))
+  }
+  
   
   get_results = function(data) {
+
     # method for doing the analysis on an xlsx file
     threshold = input$thresholdFactor
     data = drop_na(data)
-    #data[,-1] = data[,-1]-min(data[,-1])
     Time = unname(unlist(data[,1]))
     
     cells = select(data, -1)
-    
-    
-    get_area = function(col){
-      my_min = min(col)
+    cell_stats = gather_accross_files()  #get min, max, baseline and var from all files
+
+    get_area = function(col, stats){
+      my_min = stats[1]
       col_norm = col - my_min
-      my_max = max(col_norm)
+      my_max = stats[2]
       col = col_norm / my_max
-      baseline = median(col)   # get median of all cell data
-      variance = mad(col)      # measure of variance (adds 1.4826 factor)
-      # col_minus_baseline = (col - baseline)
+      baseline = stats[3]   # get median of all cell data
+      variance = stats[4]    
+
       all_spike_locations = (col > input$thresholdFactor*variance + baseline)
-      
+
       ## method from https://masterr.org/r/how-to-find-consecutive-repeats-in-r/
       rle.all_spike_locations = rle(as.numeric(all_spike_locations))
       myruns = which(rle.all_spike_locations$values == TRUE & rle.all_spike_locations$lengths >= input$lengthCutoff)
@@ -38,12 +74,12 @@ shinyServer(function(input,output) {
       
       cum_area = 0
       if (length(ends)==0) {
-        return(c(0.0,0.0,0.0,0.0,0.0, 0.0,input$thresholdFactor*variance+baseline, 0.0, 0.0))
+        return(c(0.0,0.0,0.0,0.0,0.0, 0.0,input$thresholdFactor*variance+baseline, 0.0))
         
       }else{
         max_spike_area = 0.0
         longest_time = 0.0
-        lin_coeff = c()
+        #lin_coeff = c()
         exp_coeff = c()
         all_falling_spike_duration = c()
         all_rising_spike_duration = c()
@@ -69,11 +105,11 @@ shinyServer(function(input,output) {
           all_falling_spike_duration = cbind(all_falling_spike_duration, falling_spike_duration)
           all_rising_spike_duration = cbind(all_rising_spike_duration, rising_spike_duration)
         
-          lm_result = lm(falling_spike_vals ~ falling_spike_times)        #run linear regression
-          
+         # lm_result = lm(falling_spike_vals ~ falling_spike_times)        #run linear regression
+
           exp_result = lm(log(falling_spike_vals) ~ falling_spike_times)  #run "exp regression"
           
-          lin_coeff = cbind(lin_coeff, unname(lm_result$coefficients[2]))
+          #lin_coeff = cbind(lin_coeff, unname(lm_result$coefficients[2]))
           exp_coeff = cbind(exp_coeff, unname(exp_result$coefficients[2]))
           
           
@@ -84,7 +120,7 @@ shinyServer(function(input,output) {
           }
           cum_area = cum_area+spike_area
         }
-        mean_lin_coeff = mean(lin_coeff, na.rm=TRUE)
+        #mean_lin_coeff = mean(lin_coeff, na.rm=TRUE)
         mean_exp_coeff = mean(exp_coeff, na.rm=TRUE)
         mean_rising_spike_duration = mean(all_rising_spike_duration, na.rm = T)
         mean_falling_spike_duration = mean(all_falling_spike_duration, na.rm = T)
@@ -98,51 +134,50 @@ shinyServer(function(input,output) {
           mean_rising_spike_duration,
           mean_falling_spike_duration,
           input$thresholdFactor*variance+baseline,      # threshold
-          mean_exp_coeff,                               # average coeff from exp linear regression
-          mean_lin_coeff                                # avg coeff from simple linear regression
+          mean_exp_coeff                               # average coeff from exp linear regression
+         # mean_lin_coeff                                # avg coeff from simple linear regression
           
         )
         return(results)
       }
     }
     
-    results = apply(cells, 2, get_area)
+    results = mapply(get_area, as.data.frame(cells), as.data.frame(cell_stats))
     results = t(results)
     results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
-    colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold",  "mean_lin_coeff", "mean_exp_coeff")
+    colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
     
     return(as_tibble(results))
     
   }
+
   
-  get_Fdelta = function(data){
+    get_Fdelta = function(data){
+    cell_stats = gather_accross_files()
     data = drop_na(data)
     cells = select(data, -1)
     Time = unname(unlist(data[,1]))
     
-    helper = function(col){
-      my_min = min(col)
-      col = col - my_min
-      my_max = max(col)
-      col = col / my_max
+    
+    helper = function(col, stats){
+      my_min = stats[1]
+      col_norm = col - my_min
+      my_max = stats[2]
+      col = col_norm / my_max
       
       mean = mean(col)
       col = (col - mean)/mean
       return(col)
     }
-    cell_out = apply(cells, 2, helper)
+    cell_out = mapply(helper, as.data.frame(cells), as.data.frame(cell_stats))
     cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
     cell_out = t(cell_out)
   }
   
-  get_spike_inx = function(col){
+  get_spike_inx = function(col, baseline, var){
     #for creating a logical vector of where spikes are so that they can be displayed on plot
-    
-    baseline = median(unlist(col))   # get median of all cell data
-    variance = mad(unlist(col))      # measure of variance (adds 1.4826 factor)
-    #col_minus_baseline = (col - baseline)
-    all_spike_locations = (col > input$thresholdFactor*variance + baseline)
-    
+    all_spike_locations = (col > input$thresholdFactor*var + baseline)
+
     ## method from https://masterr.org/r/how-to-find-consecutive-repeats-in-r/
     rle.all_spike_locations = rle(as.numeric(all_spike_locations))          
     for (i in 1:length(rle.all_spike_locations$lengths)){
@@ -178,6 +213,7 @@ shinyServer(function(input,output) {
   # Following code displays the select input widget with the list of file loaded by the user
   output$selectfile <- renderUI({
     if(is.null(input$file)) {return()}
+    
     list(hr(), 
          helpText("Select the files for which you need to see data and summary stats"),
          selectInput("Select", "Select", choices=input$file$name)
@@ -187,12 +223,17 @@ shinyServer(function(input,output) {
   
   
   
+  
+  
+  
   #run the get_results function on all the files uploaded for downloading later....
   run_all = function(){
     files = NULL;
-    withProgress(message = 'Processing Files', value = 0, {
+    withProgress(message = 'Processing data...', value = 0, {
+      
     #loop through the sheets
     len = length(input$file$name)
+
     for (i in 1:len){
       #write each sheet to a csv file, save the name
       #trunc_name = substr(input$file$name[i], 1, nchar(input$file$name)-5)
@@ -200,10 +241,11 @@ shinyServer(function(input,output) {
       fileName1 = paste(trunc_name,"spike_stats.csv",sep = "_")
       fileName2 = paste(trunc_name,"deltaF.csv",sep = "_")
       
-      path = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
-      temp = get_results(path)
-      temp2 = t(get_Fdelta(path))
+      data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
       
+      temp = get_results(data)
+      temp2 = t(get_Fdelta(data))
+
       write.table(temp, fileName1, sep = ',', row.names = F, col.names = T)
       write.table(temp2, fileName2, sep = ',', row.names = T, col.names = F)
       
@@ -222,12 +264,11 @@ shinyServer(function(input,output) {
     if(is.null(input$file)){return()}
     as.data.frame(get_results(read_excel(path = input$file$datapath[input$file$name==input$Select], skip = 1, trim_ws = TRUE)))
     
+
   })
-  # data =  read_excel(file=input$file$datapath[input$file$name==input$Select], skip = 1, trim_ws = TRUE)
-  # get_results(data)
-  # })
+
   
-  dat <- reactive({
+  get_data <- reactive({
     if(is.null(input$file)){return()}
     data = read_excel(path = input$file$datapath[input$file$name==input$Select], skip = 1, trim_ws = TRUE)
     data = drop_na(data)
@@ -236,19 +277,29 @@ shinyServer(function(input,output) {
     return(data)
   })
   
+  
+  # function for plotting
   output$plot <- renderPlot({ 
-    data = dat()
+    
+    cell_stats = gather_accross_files()  #get min, max, baseline and var from all files
+    data = get_data()
+    Time = data[, 1]
+    data = data[, -1]
     
     cell = unname(unlist(data[ ,input$num]))   #columns of data, user selected
-    my_min = min(cell)
+    
+    my_min = cell_stats[1, input$num]
     cell_norm = cell - my_min
-    my_max = max(cell_norm)
+    my_max = cell_stats[2, input$num]
     cell_norm = cell_norm / my_max
-    logical = as.logical(get_spike_inx(cell))
     
+    baseline = cell_stats[3, input$num]
+    variance = cell_stats[4, input$num]
     
+    logical = as.logical(get_spike_inx(cell_norm, baseline, variance))
+
     
-    ggplot(data, aes(x = as.vector(as.matrix(data[,1])), y = cell_norm))+
+    ggplot(data, aes(x = as.matrix(Time), y = cell_norm))+
       geom_point(aes(color = logical))+
       scale_color_manual(labels = c("<baseline", ">baseline"), values=c('blue', 'red')) +
       labs(color = "Normalized Spikes")+

@@ -3,7 +3,7 @@ library(tidyverse)
 library(readxl)
 library(pracma)
 library(reader)
-
+library(Rfast)
 
 shinyUI(fluidPage(
     titlePanel("Upload xlsx files"),
@@ -17,9 +17,9 @@ shinyUI(fluidPage(
             #radioButtons(inputId = 'sep', label = 'Separator', choices = c(Comma=',',Semicolon=';',Tab='\t', Space=''), selected = ','),
             uiOutput("selectfile"),
             tags$hr(),
-            sliderInput("num", "Cell to plot:",min = 2, max = 400, step=1,value=c(2)),
+            sliderInput("num", "Cell to plot:",min = 1, max = 400, step=1,value=c(1)),
             tags$hr(),
-            sliderInput("thresholdFactor", "Scale Threshold:",min = 0, max = 10, step=.05, value=c(1)),
+            sliderInput("thresholdFactor", "Scale Threshold:",min = 0, max = 10, step=.2, value=c(1)),
             tags$hr(),
             sliderInput("lengthCutoff", "Minimum time units of spike:",min = 0, max = 100, step=1,value=c(10)),
             tags$hr(),
