@@ -1,13 +1,21 @@
+#check about DeltaF output format
+
+#assumptions: -last 3 rows of all xlsx files are throwaway
+#             -wake files have w or W in them
+
+
 library(shiny)
 
 # use the below options code if you wish to increase the file input limit
-options(shiny.maxRequestSize = 30*1024^2)
+options(shiny.maxRequestSize = 100*1024^2)
 
 shinyServer(function(input,output, session) {
   
   
   gather_accross_files = function(){
     # we want to get cell statistics across ALL the files uploaded...
+    wake_file_idx = grep("[wW]", v, perl = T, value = F)
+    #validate(need(length(wake_file_idx)!=0, "Please upload wake files (has w or W in filename)" )) 
     len = length(input$file$name)
     data =  read_excel(path = input$file$datapath[1], skip = 1, trim_ws = TRUE)
     ncols = length(data)
@@ -15,13 +23,31 @@ shinyServer(function(input,output, session) {
     n = dim(data)[1]
     data = data[1:(n-3),-1]  #last three rows of data are always throwaways
     data = drop_na(data)
+    max_amp = zeros(1,ncols)
+    if (length(wake_file_idx)==0 | 1 %in% wake_file_idx){  #if no wake files get max amp from first file
+      local_medians = apply(data, 2, median)  #apply median to every cell col in data
+      local_maxs = apply(data, 2, max)
+      local_amp = local_maxs-local_medians
+      replace = local_amp > max_amp
+      max_amp[replace] = local_amp[replace]
+    }
+    
     if (len > 1){
       for (i in 2:len){
         local_data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
-        validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))
+        validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))  #make sure data has equal cols
         ncols = length(local_data)
         local_data = local_data[,-1]
         local_data = drop_na(local_data)
+        
+        if (i %in% wake_file_idx){
+          local_medians = apply(data, 2, median)  #apply median to every cell col in data
+          local_maxs = apply(data, 2, max)
+          local_amp = local_maxs-local_medians
+          replace = local_amp > max_amp
+          max_amp[replace] = local_amp[replace]
+        }
+        
         rbind(data, local_data)
       }
     }
@@ -31,13 +57,12 @@ shinyServer(function(input,output, session) {
     data = mapply("-", data, cell_mins )
     data = as.data.frame(data)
     cell_maxs = apply(data, 2, max)
-   
     data = mapply("/", data, cell_maxs)
     
     cell_baseline = apply(data, 2, median)
     cell_variance = apply(data, 2, mad)
 
-    return(rbind(cell_mins, cell_maxs, cell_baseline, cell_variance))
+    return(rbind(cell_mins, cell_maxs, cell_baseline, cell_variance, max_amp))
   }
   
   
@@ -50,15 +75,14 @@ shinyServer(function(input,output, session) {
     
     cells = select(data, -1)
     cell_stats = gather_accross_files()  #get min, max, baseline and var from all files
-
     get_area = function(col, stats){
-      my_min = stats[1]
-      col_norm = col - my_min
-      my_max = stats[2]
-      col = col_norm / my_max
+      #my_min = stats[1]
+      #col_norm = col - my_min
+      max_amp = stats[5]
+      col = col / max_amp
       baseline = stats[3]   # get median of all cell data
       variance = stats[4]    
-
+      
       all_spike_locations = (col > input$thresholdFactor*variance + baseline)
 
       ## method from https://masterr.org/r/how-to-find-consecutive-repeats-in-r/
@@ -152,7 +176,7 @@ shinyServer(function(input,output, session) {
   }
 
   
-    get_Fdelta = function(data){
+  get_Fdelta = function(data){
     cell_stats = gather_accross_files()
     data = drop_na(data)
     cells = select(data, -1)
@@ -160,18 +184,19 @@ shinyServer(function(input,output, session) {
     
     
     helper = function(col, stats){
-      my_min = stats[1]
-      col_norm = col - my_min
-      my_max = stats[2]
-      col = col_norm / my_max
+      #my_min = stats[1]
+      #col = col - my_min
+      max_amp = stats[5]
+      col = col / max_amp
       
-      mean = mean(col)
-      col = (col - mean)/mean
+      median = median(col)
+      col = (col - median)/median
+      
       return(col)
     }
     cell_out = mapply(helper, as.data.frame(cells), as.data.frame(cell_stats))
-    cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
-    cell_out = t(cell_out)
+    #cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
+    #cell_out = t(cell_out)
   }
   
   get_spike_inx = function(col, baseline, var){
@@ -240,12 +265,10 @@ shinyServer(function(input,output, session) {
       trunc_name = rmv.ext(input$file$name[i])
       fileName1 = paste(trunc_name,"spike_stats.csv",sep = "_")
       fileName2 = paste(trunc_name,"deltaF.csv",sep = "_")
-      
-      data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
-      
-      temp = get_results(data)
-      temp2 = t(get_Fdelta(data))
 
+      data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
+      temp = get_results(data)
+      temp2 = (get_Fdelta(data))
       write.table(temp, fileName1, sep = ',', row.names = F, col.names = T)
       write.table(temp2, fileName2, sep = ',', row.names = T, col.names = F)
       
@@ -287,19 +310,18 @@ shinyServer(function(input,output, session) {
     data = data[, -1]
     
     cell = unname(unlist(data[ ,input$num]))   #columns of data, user selected
-    
-    my_min = cell_stats[1, input$num]
-    cell_norm = cell - my_min
-    my_max = cell_stats[2, input$num]
-    cell_norm = cell_norm / my_max
+    #my_min = cell_stats[1, input$num]
+    #cell_norm = cell - my_min
+    max_amp = cell_stats[5, input$num]
+    cell = cell / max_amp
     
     baseline = cell_stats[3, input$num]
     variance = cell_stats[4, input$num]
     
-    logical = as.logical(get_spike_inx(cell_norm, baseline, variance))
+    logical = as.logical(get_spike_inx(cell, baseline, variance))
 
     
-    ggplot(data, aes(x = as.matrix(Time), y = cell_norm))+
+    ggplot(data, aes(x = as.matrix(Time), y = cell))+
       geom_point(aes(color = logical))+
       scale_color_manual(labels = c("<baseline", ">baseline"), values=c('blue', 'red')) +
       labs(color = "Normalized Spikes")+

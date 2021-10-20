@@ -4,6 +4,7 @@ library(readxl)
 library(pracma)
 library(reader)
 library(Rfast)
+library(wavelets)
 
 shinyUI(fluidPage(
     titlePanel("Upload xlsx files"),
@@ -22,6 +23,8 @@ shinyUI(fluidPage(
             sliderInput("thresholdFactor", "Scale Threshold:",min = 0, max = 10, step=.2, value=c(1)),
             tags$hr(),
             sliderInput("lengthCutoff", "Minimum time units of spike:",min = 0, max = 100, step=1,value=c(10)),
+            tags$hr(),
+            checkboxInput("wavelet", "Use wavelet transform to count spikes",value=T),
             tags$hr(),
             downloadButton("download", "Download File(s)")
             
