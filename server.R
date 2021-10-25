@@ -14,7 +14,7 @@ shinyServer(function(input,output, session) {
   
   gather_accross_files = function(){
     # we want to get cell statistics across ALL the files uploaded...
-    wake_file_idx = grep("[wW]", v, perl = T, value = F)
+    wake_file_idx = grep("[wW]", input$file$name, perl = T, value = F)
     #validate(need(length(wake_file_idx)!=0, "Please upload wake files (has w or W in filename)" )) 
     len = length(input$file$name)
     data =  read_excel(path = input$file$datapath[1], skip = 1, trim_ws = TRUE)
