@@ -11,30 +11,41 @@ options(shiny.maxRequestSize = 100*1024^2)
 
 shinyServer(function(input,output, session) {
   
+  rm_cells = function(string){
+    rmcells = str_replace_all(string, " ", "")  #cleans string specifying which cells to remove
+    rmcells = as.numeric(strsplit(rmcells, ",")[[1]])
+  }
   
-  gather_accross_files = function(){
+  
+  gather_across_files = function(){
     # we want to get cell statistics across ALL the files uploaded...
     wake_file_idx = grep("[wW]", input$file$name, perl = T, value = F)
     #validate(need(length(wake_file_idx)!=0, "Please upload wake files (has w or W in filename)" )) 
     len = length(input$file$name)
-    data =  read_excel(path = input$file$datapath[1], skip = 1, trim_ws = TRUE)
+    data =  read_excel(path = input$file$datapath[1], skip = 1, trim_ws = TRUE)  # read the first file
     ncols = length(data)
     updateSliderInput(session, "num", max = ncols-1)
-    n = dim(data)[1]
-    data = data[1:(n-3),-1]  #last three rows of data are always throwaways
-    data = drop_na(data)
-    max_amp = zeros(1,ncols)
-    if (length(wake_file_idx)==0 | 1 %in% wake_file_idx){  #if no wake files get max amp from first file
-      local_medians = apply(data, 2, median)  #apply median to every cell col in data
+    rmcells = rm_cells(input$rmcells)
+    print("removing cells:")
+    print(rmcells )
+    rmcells = rmcells + 1                          # increase idx by one because time column is 1st col in "data"
+    data[,rmcells] = 0.0                           # set cells labeled as rmcells to 0, don't remove because then cell indices become a pain to keep track of
+    #first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
+    #data = data[1:(first_NA_row-1),-1]                        # removes all info after the first NA, needed for the sample files I got to test this on
+    data = data[, -1]
+    data = drop_na(data)                                      # extra precaution, we don't want any NA values
+    max_amp = 1.0                                             # This variable will be set to the max amplitude of any cell in the folder, used to scale DeltaFFx
+    if (length(wake_file_idx)==0 | 1 %in% wake_file_idx){     # if no wake files get max amp from first file
+      local_medians = apply(data, 2, median)                  # apply median to every cell col in data
       local_maxs = apply(data, 2, max)
       local_amp = local_maxs-local_medians
-      replace = local_amp > max_amp
-      max_amp[replace] = local_amp[replace]
+      max_amp = max(local_amp)
     }
     
-    if (len > 1){
+    if (len > 1){        #if there are multiple files being uploaded:
       for (i in 2:len){
         local_data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
+       
         validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))  #make sure data has equal cols
         ncols = length(local_data)
         local_data = local_data[,-1]
@@ -44,10 +55,8 @@ shinyServer(function(input,output, session) {
           local_medians = apply(data, 2, median)  #apply median to every cell col in data
           local_maxs = apply(data, 2, max)
           local_amp = local_maxs-local_medians
-          replace = local_amp > max_amp
-          max_amp[replace] = local_amp[replace]
+          max_amp = max(local_amp)
         }
-        
         rbind(data, local_data)
       }
     }
@@ -61,7 +70,6 @@ shinyServer(function(input,output, session) {
     
     cell_baseline = apply(data, 2, median)
     cell_variance = apply(data, 2, mad)
-
     return(rbind(cell_mins, cell_maxs, cell_baseline, cell_variance, max_amp))
   }
   
@@ -74,12 +82,17 @@ shinyServer(function(input,output, session) {
     Time = unname(unlist(data[,1]))
     
     cells = select(data, -1)
-    cell_stats = gather_accross_files()  #get min, max, baseline and var from all files
+    rmcells = rm_cells(input$rmcells)
+    cells[,rmcells] = 0.0
+    
+    stats = gather_across_files()  #get min, max, baseline and var from all files
+    
     get_area = function(col, stats){
-      #my_min = stats[1]
-      #col_norm = col - my_min
-      max_amp = stats[5]
-      col = col / max_amp
+      my_min = stats[1]
+      col = col - my_min
+      my_max = stats[2]
+      #max_amp = stats[5]
+      col = col / my_max
       baseline = stats[3]   # get median of all cell data
       variance = stats[4]    
       
@@ -166,7 +179,7 @@ shinyServer(function(input,output, session) {
       }
     }
     
-    results = mapply(get_area, as.data.frame(cells), as.data.frame(cell_stats))
+    results = mapply(get_area, as.data.frame(cells), as.data.frame(stats))
     results = t(results)
     results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
     colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
@@ -177,20 +190,19 @@ shinyServer(function(input,output, session) {
 
   
   get_Fdelta = function(data){
-    cell_stats = gather_accross_files()
+    cell_stats = gather_across_files()
     data = drop_na(data)
     cells = select(data, -1)
+    rmcells = rm_cells(input$rmcells)
+    cells[,rmcells] =0.0      #set cells labeled as rmcells to 0
     Time = unname(unlist(data[,1]))
     
     
     helper = function(col, stats){
-      #my_min = stats[1]
-      #col = col - my_min
+      med = median(col)
+      col = col - med
       max_amp = stats[5]
       col = col / max_amp
-      
-      median = median(col)
-      col = (col - median)/median
       
       return(col)
     }
@@ -304,19 +316,19 @@ shinyServer(function(input,output, session) {
   # function for plotting
   output$plot <- renderPlot({ 
     
-    cell_stats = gather_accross_files()  #get min, max, baseline and var from all files
+    stats = gather_across_files()  #get min, max, baseline and var from all files
     data = get_data()
     Time = data[, 1]
     data = data[, -1]
     
     cell = unname(unlist(data[ ,input$num]))   #columns of data, user selected
-    #my_min = cell_stats[1, input$num]
-    #cell_norm = cell - my_min
-    max_amp = cell_stats[5, input$num]
-    cell = cell / max_amp
-    
-    baseline = cell_stats[3, input$num]
-    variance = cell_stats[4, input$num]
+    my_min = stats[1, input$num]
+    cell = cell - my_min
+    my_max = stats[2, input$num]
+    cell = cell / my_max
+
+    baseline = stats[3, input$num]
+    variance = stats[4, input$num]
     
     logical = as.logical(get_spike_inx(cell, baseline, variance))
 
