@@ -26,8 +26,6 @@ shinyUI(fluidPage(
             tags$hr(),
             sliderInput("lengthCutoff", "Minimum time units of spike:",min = 0, max = 100, step=1,value=c(27.5)),
             tags$hr(),
-            checkboxInput("wavelet", "Use wavelet transform to count spikes",value=T),
-            tags$hr(),
             downloadButton("download", "Download File(s)")
             
             

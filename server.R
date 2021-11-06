@@ -14,6 +14,7 @@ shinyServer(function(input,output, session) {
   rm_cells = function(string){
     rmcells = str_replace_all(string, " ", "")  #cleans string specifying which cells to remove
     rmcells = as.numeric(strsplit(rmcells, ",")[[1]])
+    rmcells = unique(rmcells)
   }
   
   
@@ -28,11 +29,13 @@ shinyServer(function(input,output, session) {
     rmcells = rm_cells(input$rmcells)
     print("removing cells:")
     print(rmcells )
-    rmcells = rmcells + 1                          # increase idx by one because time column is 1st col in "data"
+    rmcells = rmcells                          # increase idx by one because time column is 1st col in "data"
     data[,rmcells] = 0.0                           # set cells labeled as rmcells to 0, don't remove because then cell indices become a pain to keep track of
-    #first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
-    #data = data[1:(first_NA_row-1),-1]                        # removes all info after the first NA, needed for the sample files I got to test this on
-    data = data[, -1]
+    
+    first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
+    if(is.finite(first_NA_row)){
+        data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
+    }
     data = drop_na(data)                                      # extra precaution, we don't want any NA values
     max_amp = 1.0                                             # This variable will be set to the max amplitude of any cell in the folder, used to scale DeltaFFx
     if (length(wake_file_idx)==0 | 1 %in% wake_file_idx){     # if no wake files get max amp from first file
@@ -48,8 +51,13 @@ shinyServer(function(input,output, session) {
        
         validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))  #make sure data has equal cols
         ncols = length(local_data)
-        local_data = local_data[,-1]
+        
+        first_NA_row = min(which(is.na(local_data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
+        if(is.finite(first_NA_row)){
+          local_data = local_data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
+        }
         local_data = drop_na(local_data)
+        local_data[,rmcells] = 0.0
         
         if (i %in% wake_file_idx){
           local_medians = apply(data, 2, median)  #apply median to every cell col in data
@@ -57,6 +65,7 @@ shinyServer(function(input,output, session) {
           local_amp = local_maxs-local_medians
           max_amp = max(local_amp)
         }
+       
         rbind(data, local_data)
       }
     }
@@ -78,6 +87,10 @@ shinyServer(function(input,output, session) {
 
     # method for doing the analysis on an xlsx file
     threshold = input$thresholdFactor
+    first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
+    if(is.finite(first_NA_row)){
+      data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
+    }
     data = drop_na(data)
     Time = unname(unlist(data[,1]))
     
@@ -191,6 +204,10 @@ shinyServer(function(input,output, session) {
   
   get_Fdelta = function(data){
     cell_stats = gather_across_files()
+    first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
+    if(is.finite(first_NA_row)){
+      data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
+    }
     data = drop_na(data)
     cells = select(data, -1)
     rmcells = rm_cells(input$rmcells)
@@ -207,6 +224,8 @@ shinyServer(function(input,output, session) {
       return(col)
     }
     cell_out = mapply(helper, as.data.frame(cells), as.data.frame(cell_stats))
+    colnames(cell_out) = paste( "Cell", seq(1,dim(cell_out)[2]))
+    return(cell_out)
     #cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
     #cell_out = t(cell_out)
   }
@@ -282,7 +301,7 @@ shinyServer(function(input,output, session) {
       temp = get_results(data)
       temp2 = (get_Fdelta(data))
       write.table(temp, fileName1, sep = ',', row.names = F, col.names = T)
-      write.table(temp2, fileName2, sep = ',', row.names = T, col.names = F)
+      write.table(temp2, fileName2, sep = ',', row.names = T, col.names = NA)
       
       files = c(fileName1,files)
       files = c(fileName2, files)
@@ -306,6 +325,10 @@ shinyServer(function(input,output, session) {
   get_data <- reactive({
     if(is.null(input$file)){return()}
     data = read_excel(path = input$file$datapath[input$file$name==input$Select], skip = 1, trim_ws = TRUE)
+    first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
+    if(is.finite(first_NA_row)){
+      data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
+    }
     data = drop_na(data)
     #data[,-1] = data[,-1]-min(data[,-1])
     
