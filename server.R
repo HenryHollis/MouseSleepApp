@@ -1,8 +1,3 @@
-#check about DeltaF output format
-
-#assumptions: -last 3 rows of all xlsx files are throwaway
-#             -wake files have w or W in them
-
 
 library(shiny)
 
@@ -10,6 +5,7 @@ library(shiny)
 options(shiny.maxRequestSize = 100*1024^2)
 
 shinyServer(function(input,output, session) {
+
   
   rm_cells = function(string){
     rmcells = str_replace_all(string, " ", "")  #cleans string specifying which cells to remove
@@ -17,74 +13,34 @@ shinyServer(function(input,output, session) {
     rmcells = unique(rmcells)
   }
   
-  
+
   gather_across_files = function(){
-    # we want to get cell statistics across ALL the files uploaded...
-    wake_file_idx = grep("[wW]", input$file$name, perl = T, value = F)
-    #validate(need(length(wake_file_idx)!=0, "Please upload wake files (has w or W in filename)" )) 
-    len = length(input$file$name)
-    data =  read_excel(path = input$file$datapath[1], skip = 1, trim_ws = TRUE)  # read the first file
+    max_file_idx = grep("[Mm][Aa][xX]", input$file$name, perl = T, value = F)
+    validate(need(length(max_file_idx)==1, "Please upload a single file with max values for each cell" ))  #make sure data has equal cols
+    files = input$file$name[-max_file_idx]
+    usable_input_file_idx = which(input$file$name %in% files)
+    len = length(usable_input_file_idx)
+    data =  read_excel(path = input$file$datapath[ usable_input_file_idx[1]], skip = 1, trim_ws = TRUE)  # read the first file
     ncols = length(data)
     updateSliderInput(session, "num", max = ncols-1)
-    rmcells = rm_cells(input$rmcells)
-    print("removing cells:")
-    print(rmcells )
-    rmcells = rmcells                          # increase idx by one because time column is 1st col in "data"
-    data[,rmcells] = 0.0                           # set cells labeled as rmcells to 0, don't remove because then cell indices become a pain to keep track of
-    
-    first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
-    if(is.finite(first_NA_row)){
-        data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
-    }
-    data = drop_na(data)                                      # extra precaution, we don't want any NA values
-    max_amp = 1.0                                             # This variable will be set to the max amplitude of any cell in the folder, used to scale DeltaFFx
-    if (length(wake_file_idx)==0 | 1 %in% wake_file_idx){     # if no wake files get max amp from first file
-      local_medians = apply(data, 2, median)                  # apply median to every cell col in data
-      local_maxs = apply(data, 2, max)
-      local_amp = local_maxs-local_medians
-      max_amp = max(local_amp)
-    }
     
     if (len > 1){        #if there are multiple files being uploaded:
-      for (i in 2:len){
-        local_data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
-       
-        validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))  #make sure data has equal cols
-        ncols = length(local_data)
+      for (i in usable_input_file_idx[-1]){
+          local_data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
+          validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))  #make sure data has equal cols
+          ncols = length(local_data)
         
-        first_NA_row = min(which(is.na(local_data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
-        if(is.finite(first_NA_row)){
-          local_data = local_data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
-        }
-        local_data = drop_na(local_data)
-        local_data[,rmcells] = 0.0
-        
-        if (i %in% wake_file_idx){
-          local_medians = apply(data, 2, median)  #apply median to every cell col in data
-          local_maxs = apply(data, 2, max)
-          local_amp = local_maxs-local_medians
-          max_amp = max(local_amp)
-        }
-       
-        rbind(data, local_data)
       }
     }
-    
-    cell_mins = apply(data, 2, min)
-
-    data = mapply("-", data, cell_mins )
-    data = as.data.frame(data)
-    cell_maxs = apply(data, 2, max)
-    data = mapply("/", data, cell_maxs)
-    
-    cell_baseline = apply(data, 2, median)
-    cell_variance = apply(data, 2, mad)
-    return(rbind(cell_mins, cell_maxs, cell_baseline, cell_variance, max_amp))
+    max = read_excel(input$file$datapath[max_file_idx])
+    cell_maxs = as.numeric(max)
+    validate(need(ncols-1 == length(cell_maxs), "Please make sure max file has same #cells as all data files" ))  #make sure data has equal cols
+    validate(need(is.numeric(cell_maxs), "Please make sure max file is numeric" ))
+    return(cell_maxs)
   }
   
-  
-  get_results = function(data) {
 
+  get_results = function(data) {
     # method for doing the analysis on an xlsx file
     threshold = input$thresholdFactor
     first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
@@ -98,18 +54,20 @@ shinyServer(function(input,output, session) {
     rmcells = rm_cells(input$rmcells)
     cells[,rmcells] = 0.0
     
-    stats = gather_across_files()  #get min, max, baseline and var from all files
+    maxs = gather_across_files()  #get min, max, baseline and var from all files
     
-    get_area = function(col, stats){
-      my_min = stats[1]
-      col = col - my_min
-      my_max = stats[2]
-      #max_amp = stats[5]
+    get_area = function(col, maxs){
+      baseline = median(col)
+      variance = mad(col)
+      threshold_line = threshold*variance + baseline
+
+      col = col - threshold_line
+      my_max = maxs   #comes from max file data
       col = col / my_max
-      baseline = stats[3]   # get median of all cell data
-      variance = stats[4]    
       
-      all_spike_locations = (col > input$thresholdFactor*variance + baseline)
+      
+      col_for_exp = col - median(col)
+      all_spike_locations = (col > 0)
 
       ## method from https://masterr.org/r/how-to-find-consecutive-repeats-in-r/
       rle.all_spike_locations = rle(as.numeric(all_spike_locations))
@@ -124,12 +82,11 @@ shinyServer(function(input,output, session) {
       
       cum_area = 0
       if (length(ends)==0) {
-        return(c(0.0,0.0,0.0,0.0,0.0, 0.0,input$thresholdFactor*variance+baseline, 0.0))
+        return(c(0.0,0.0,0.0,0.0,0.0,0.0, 0.0,threshold_line, 0.0))
         
       }else{
         max_spike_area = 0.0
         longest_time = 0.0
-        #lin_coeff = c()
         exp_coeff = c()
         all_falling_spike_duration = c()
         all_rising_spike_duration = c()
@@ -144,24 +101,25 @@ shinyServer(function(input,output, session) {
           spike_points = col[starts[i]:ends[i]] # y values of spikes
           
           max_spike_val = max(spike_points)
-          max_spike_idx = which(spike_points == max_spike_val) + starts[i]
+          max_spike_idx = which(spike_points == max_spike_val) + starts[i]  #argmax of max_spike_val
           
           falling_spike_times = Time[max_spike_idx:ends[i]]               # spike time-interval, times when spike is declining
-          falling_spike_vals = col[max_spike_idx:ends[i]]  # values of spike as it's declining
+          falling_spike_vals = col_for_exp[max_spike_idx:ends[i]]                 # values of spike as it's declining
           rising_spike_times = Time[starts[i]:max_spike_idx]
           
           rising_spike_duration = range(rising_spike_times)[2] - range(rising_spike_times)[1]
           falling_spike_duration = range(falling_spike_times)[2] - range(falling_spike_times)[1]
           all_falling_spike_duration = cbind(all_falling_spike_duration, falling_spike_duration)
           all_rising_spike_duration = cbind(all_rising_spike_duration, rising_spike_duration)
-        
-         # lm_result = lm(falling_spike_vals ~ falling_spike_times)        #run linear regression
-
-          exp_result = lm(log(falling_spike_vals) ~ falling_spike_times)  #run "exp regression"
           
-          #lin_coeff = cbind(lin_coeff, unname(lm_result$coefficients[2]))
-          exp_coeff = cbind(exp_coeff, unname(exp_result$coefficients[2]))
           
+          exp_decay_bool = sum(diff(falling_spike_vals)) <2 #if falling spike has 2 or more increases, dont calc decay
+          if(exp_decay_bool){
+              exp_result = lm(log(falling_spike_vals) ~ falling_spike_times)  #run "exp regression"
+              exp_coeff = cbind(exp_coeff, unname(exp_result$coefficients[2]))
+          }else{
+              exp_coeff = cbind(exp_coeff, NA)
+          }
           
           spike_area = trapz(time, spike_points)    # integrate spike with trapz package (trapazoidal integration)
           
@@ -170,7 +128,6 @@ shinyServer(function(input,output, session) {
           }
           cum_area = cum_area+spike_area
         }
-        #mean_lin_coeff = mean(lin_coeff, na.rm=TRUE)
         mean_exp_coeff = mean(exp_coeff, na.rm=TRUE)
         mean_rising_spike_duration = mean(all_rising_spike_duration, na.rm = T)
         mean_falling_spike_duration = mean(all_falling_spike_duration, na.rm = T)
@@ -178,6 +135,7 @@ shinyServer(function(input,output, session) {
         
         results = c(  
           cum_area/length(ends),                        # average spike area
+          cum_area/(length(ends) * 0.05 * length(col)), #average area / 0.05 * number of rows (accounts for different recording times)
           length(ends),                                 # number of spikes
           max_spike_area,                               # max_spike_area
           longest_time,                                 # longest time
@@ -185,17 +143,15 @@ shinyServer(function(input,output, session) {
           mean_falling_spike_duration,
           input$thresholdFactor*variance+baseline,      # threshold
           mean_exp_coeff                               # average coeff from exp linear regression
-         # mean_lin_coeff                                # avg coeff from simple linear regression
-          
         )
         return(results)
       }
     }
     
-    results = mapply(get_area, as.data.frame(cells), as.data.frame(stats))
+    results = mapply(get_area, as.data.frame(cells), maxs)
     results = t(results)
     results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
-    colnames(results) = c("cell_id", "avg_spike_area", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
+    colnames(results) = c("cell_id", "avg_spike_area", "corrected_apike_area", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
     
     return(as_tibble(results))
     
@@ -203,7 +159,7 @@ shinyServer(function(input,output, session) {
 
   
   get_Fdelta = function(data){
-    cell_stats = gather_across_files()
+    maxs = gather_across_files()
     first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
     if(is.finite(first_NA_row)){
       data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
@@ -215,24 +171,24 @@ shinyServer(function(input,output, session) {
     Time = unname(unlist(data[,1]))
     
     
-    helper = function(col, stats){
-      med = median(col)
-      col = col - med
-      max_amp = stats[5]
-      col = col / max_amp
+    helper = function(col, maxs){
+      baseline = median(col)
+      variance = mad(col)
+      threshold_line = input$thresholdFactor*variance + baseline
+      col = col - threshold_line
+      my_max = maxs   #comes from max file data
+      col = col / my_max
       
       return(col)
     }
-    cell_out = mapply(helper, as.data.frame(cells), as.data.frame(cell_stats))
+    cell_out = mapply(helper, as.data.frame(cells), maxs)
     colnames(cell_out) = paste( "Cell", seq(1,dim(cell_out)[2]))
     return(cell_out)
-    #cell_out = as_tibble(cell_out) %>% mutate(Time = data[,1]) %>% select( Time, everything())
-    #cell_out = t(cell_out)
   }
   
   get_spike_inx = function(col, baseline, var){
     #for creating a logical vector of where spikes are so that they can be displayed on plot
-    all_spike_locations = (col > input$thresholdFactor*var + baseline)
+    all_spike_locations = (col > 0)
 
     ## method from https://masterr.org/r/how-to-find-consecutive-repeats-in-r/
     rle.all_spike_locations = rle(as.numeric(all_spike_locations))          
@@ -289,10 +245,10 @@ shinyServer(function(input,output, session) {
       
     #loop through the sheets
     len = length(input$file$name)
-
+    max_file_idx = grep("[Mm][Aa][xX]", input$file$name, perl = T, value = F)
     for (i in 1:len){
+      if(input$file$datapath[i] != input$file$datapath[ max_file_idx] ){
       #write each sheet to a csv file, save the name
-      #trunc_name = substr(input$file$name[i], 1, nchar(input$file$name)-5)
       trunc_name = rmv.ext(input$file$name[i])
       fileName1 = paste(trunc_name,"spike_stats.csv",sep = "_")
       fileName2 = paste(trunc_name,"deltaF.csv",sep = "_")
@@ -306,7 +262,7 @@ shinyServer(function(input,output, session) {
       files = c(fileName1,files)
       files = c(fileName2, files)
       incProgress(1/len, detail = paste("Processing file", i))
-      
+      }
     }
   })
     return(files)
@@ -330,8 +286,7 @@ shinyServer(function(input,output, session) {
       data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
     }
     data = drop_na(data)
-    #data[,-1] = data[,-1]-min(data[,-1])
-    
+
     return(data)
   })
   
@@ -339,20 +294,20 @@ shinyServer(function(input,output, session) {
   # function for plotting
   output$plot <- renderPlot({ 
     
-    stats = gather_across_files()  #get min, max, baseline and var from all files
+    maxs = gather_across_files()  #get min, max, baseline and var from all files
     data = get_data()
     Time = data[, 1]
     data = data[, -1]
-    
+
     cell = unname(unlist(data[ ,input$num]))   #columns of data, user selected
-    my_min = stats[1, input$num]
-    cell = cell - my_min
-    my_max = stats[2, input$num]
+    baseline = median(cell)
+    variance = mad(cell)
+    
+    threshold_line = input$thresholdFactor*variance + baseline
+    cell = cell - threshold_line
+    my_max = maxs[input$num]
     cell = cell / my_max
 
-    baseline = stats[3, input$num]
-    variance = stats[4, input$num]
-    
     logical = as.logical(get_spike_inx(cell, baseline, variance))
 
     
@@ -361,10 +316,7 @@ shinyServer(function(input,output, session) {
       scale_color_manual(labels = c("<baseline", ">baseline"), values=c('blue', 'red')) +
       labs(color = "Normalized Spikes")+
       xlab("Time")
-    
-    # ggplot(data = mpg, mapping = aes(x = displ, y = hwy)) + 
-    #     geom_point(mapping = aes(color = drv)) + 
-    
+
     
   })
   
