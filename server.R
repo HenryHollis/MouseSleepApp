@@ -49,13 +49,10 @@ shinyServer(function(input,output, session) {
     }
     data = drop_na(data)
     Time = unname(unlist(data[,1]))
-    
     cells = select(data, -1)
     rmcells = rm_cells(input$rmcells)
     cells[,rmcells] = 0.0
-    
     maxs = gather_across_files()  #get min, max, baseline and var from all files
-    
     get_area = function(col, maxs){
       baseline = median(col)
       variance = mad(col)
@@ -135,7 +132,7 @@ shinyServer(function(input,output, session) {
         
         results = c(  
           cum_area/length(ends),                        # average spike area
-          cum_area/(length(ends) * 0.05 * length(col)), #average area / 0.05 * number of rows (accounts for different recording times)
+          cum_area/(0.05 * length(col)), #average area / 0.05 * number of rows (accounts for different recording times)
           length(ends),                                 # number of spikes
           max_spike_area,                               # max_spike_area
           longest_time,                                 # longest time
@@ -147,11 +144,11 @@ shinyServer(function(input,output, session) {
         return(results)
       }
     }
-    
+
     results = mapply(get_area, as.data.frame(cells), maxs)
     results = t(results)
     results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
-    colnames(results) = c("cell_id", "avg_spike_area", "corrected_apike_area", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
+    colnames(results) = c("cell_id", "avg_spike_area", "total_spike_area_per_time", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
     
     return(as_tibble(results))
     
