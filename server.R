@@ -15,28 +15,33 @@ shinyServer(function(input,output, session) {
   
 
   gather_across_files = function(){
-    max_file_idx = grep("[Mm][Aa][xX]", input$file$name, perl = T, value = F)
+    max_file_idx = grep("[Mm][Aa][xX]", input$file$name, perl = T, value = F) #which file in uploads is max
     validate(need(length(max_file_idx)==1, "Please upload a single file with max values for each cell" ))  #make sure data has equal cols
-    files = input$file$name[-max_file_idx]
-    usable_input_file_idx = which(input$file$name %in% files)
+    files = input$file$name[-max_file_idx] #remove max files from "files"
+    usable_input_file_idx = which(input$file$name %in% files) 
     len = length(usable_input_file_idx)
     data =  read_excel(path = input$file$datapath[ usable_input_file_idx[1]], skip = 1, trim_ws = TRUE)  # read the first file
     ncols = length(data)
     updateSliderInput(session, "num", max = ncols-1)
+    med_devs = apply(data[,-1], 2, get_median_devs)
     
     if (len > 1){        #if there are multiple files being uploaded:
       for (i in usable_input_file_idx[-1]){
           local_data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
           validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))  #make sure data has equal cols
           ncols = length(local_data)
-        
+          local_med_devs = apply(local_data[,-1], 2, get_median_devs)
+          med_devs =  rbind(med_devs, local_med_devs)
+
       }
     }
+    mad_across_repeats = apply(med_devs, 2, median)
     max = read_excel(input$file$datapath[max_file_idx])
     cell_maxs = as.numeric(max)
     validate(need(ncols-1 == length(cell_maxs), "Please make sure max file has same #cells as all data files" ))  #make sure data has equal cols
     validate(need(is.numeric(cell_maxs), "Please make sure max file is numeric" ))
-    return(cell_maxs)
+    stats_across_recordings = rbind(cell_maxs, mad_across_repeats)
+    return(stats_across_recordings)
   }
   
 
@@ -52,10 +57,13 @@ shinyServer(function(input,output, session) {
     cells = select(data, -1)
     rmcells = rm_cells(input$rmcells)
     cells[,rmcells] = 0.0
-    maxs = gather_across_files()  #get min, max, baseline and var from all files
-    get_area = function(col, maxs){
+    cell_stats = gather_across_files()  #get min, max, baseline and var from all files
+    maxs = cell_stats[1,]
+    mads = cell_stats[2,]
+    get_area = function(col, maxs, mads){
       baseline = median(col)
-      variance = mad(col)
+      variance = mads #comes from cell_stats
+      #print(paste("mad: ", variance))
       threshold_line = threshold*variance + baseline
 
       col = col - threshold_line
@@ -95,7 +103,7 @@ shinyServer(function(input,output, session) {
             longest_time = Time[ends[i]]-Time[starts[i]]
           }
           
-          spike_points = col[starts[i]:ends[i]] # y values of spikes
+          spike_points = col[starts[i]:ends[i]]  # y values of spikes
           
           max_spike_val = max(spike_points)
           max_spike_idx = which(spike_points == max_spike_val) + starts[i]  #argmax of max_spike_val
@@ -117,7 +125,7 @@ shinyServer(function(input,output, session) {
           }else{
               exp_coeff = cbind(exp_coeff, NA)
           }
-          
+          spike_points = (spike_points + abs(median(col)))
           spike_area = trapz(time, spike_points)    # integrate spike with trapz package (trapazoidal integration)
           
           if (spike_area > max_spike_area){          # identify the max spike area
@@ -145,7 +153,7 @@ shinyServer(function(input,output, session) {
       }
     }
 
-    results = mapply(get_area, as.data.frame(cells), maxs)
+    results = mapply(get_area, as.data.frame(cells), maxs, mads)
     results = t(results)
     results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
     colnames(results) = c("cell_id", "avg_spike_area", "total_spike_area_per_time", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
@@ -156,7 +164,9 @@ shinyServer(function(input,output, session) {
 
   
   get_Fdelta = function(data){
-    maxs = gather_across_files()
+    cell_stats = gather_across_files()
+    maxs = cell_stats[1,]
+    mads = cell_stats[2, ]
     first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
     if(is.finite(first_NA_row)){
       data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
@@ -168,9 +178,9 @@ shinyServer(function(input,output, session) {
     Time = unname(unlist(data[,1]))
     
     
-    helper = function(col, maxs){
+    helper = function(col, maxs, mads){
       baseline = median(col)
-      variance = mad(col)
+      variance = mads
       threshold_line = input$thresholdFactor*variance + baseline
       col = col - threshold_line
       my_max = maxs   #comes from max file data
@@ -178,7 +188,7 @@ shinyServer(function(input,output, session) {
       
       return(col)
     }
-    cell_out = mapply(helper, as.data.frame(cells), maxs)
+    cell_out = mapply(helper, as.data.frame(cells), maxs, mads)
     colnames(cell_out) = paste( "Cell", seq(1,dim(cell_out)[2]))
     return(cell_out)
   }
@@ -267,11 +277,11 @@ shinyServer(function(input,output, session) {
   
   ## Summary Stats code ##
   # this reactive output contains the summary of the dataset and display the summary in table format
-  output$results <- renderPrint({
+  output$results <- renderTable({
     if(is.null(input$file)){return()}
-    as.data.frame(get_results(read_excel(path = input$file$datapath[input$file$name==input$Select], skip = 1, trim_ws = TRUE)))
-    
-
+    out = as.data.frame(get_results(read_excel(path = input$file$datapath[input$file$name==input$Select], skip = 1, trim_ws = TRUE)))
+   
+    out
   })
 
   
@@ -291,14 +301,16 @@ shinyServer(function(input,output, session) {
   # function for plotting
   output$plot <- renderPlot({ 
     
-    maxs = gather_across_files()  #get min, max, baseline and var from all files
+    cell_stats = gather_across_files()  #get min, max, baseline and var from all files
+    maxs = cell_stats[1,]
+    mads = cell_stats[2,]
     data = get_data()
     Time = data[, 1]
     data = data[, -1]
 
     cell = unname(unlist(data[ ,input$num]))   #columns of data, user selected
     baseline = median(cell)
-    variance = mad(cell)
+    variance = mads[input$num]
     
     threshold_line = input$thresholdFactor*variance + baseline
     cell = cell - threshold_line
@@ -324,11 +336,10 @@ shinyServer(function(input,output, session) {
     if(is.null(input$file)) {return()}
     else
       tabsetPanel(
-        tabPanel("Input File Object DF ", tableOutput("filedf"), tableOutput("filedf2")),
         tabPanel("Plot", plotOutput("plot")),
-        tabPanel("File Results", verbatimTextOutput("results")),
-        tabPanel("Input File Object Structure", verbatimTextOutput("fileob"))
-        
+        tabPanel("File Results", tableOutput("results")),
+        tabPanel("Input File Object DF ", tableOutput("filedf"), tableOutput("filedf2")),
+      
       )
   })
   
@@ -340,7 +351,11 @@ shinyServer(function(input,output, session) {
     },
     content = function(file){
       #go to a temp dir to avoid permission issues
-      owd <- setwd(tempdir())
+      if(.Platform$OS.type == "unix") {
+        owd <- setwd(tempdir())
+      } else {
+        owd = setwd('~/')
+      }
       on.exit(setwd(owd))
       files = run_all()
       
@@ -350,6 +365,12 @@ shinyServer(function(input,output, session) {
       })
     }
   )
+  
+  get_median_devs = function(col){
+    med = median(col)
+    median_devs = abs(med - col)
+    return(median_devs)
+  }
   
   
 })

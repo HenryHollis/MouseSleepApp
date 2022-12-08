@@ -3,50 +3,37 @@ library(readxl)
 library(pracma)
 library(NMOF)
 library(doParallel)
-setwd("~/Desktop/FFx for Henry/")
+setwd("~/Desktop/FFx for Henry copy/")
 cores = registerDoParallel(cores = 4)
-get_data = function(file){
-  labels <- read_excel(file, sheet = 2)
-  labels = as.data.frame(apply(labels, 2, as.numeric))
-  rmcell = which(is.na(labels))
-  labels = labels[-rmcell,]
-  data = read_excel(file, skip = 1 )
-  return(list(data, labels, rmcell))
-}
-all_paths = c("July1_4302FFx_115944W.xlsx",
-  "June3_4231FFx_150939W.xlsx",	"June3_4231FFx_160955S.xlsx",
-  "Oct13_4226FFx_115758W.xlsx",
-  "July16_4223FFx_130633W.xlsx"	,"Oct13_4226FFx_122902S.xlsx",
-  "July16_4223FFx_145147S.xlsx"	,"Oct7_4254FFx_101225W.xlsx",
-  "Oct7_4254FFx_122012S.xlsx",
-  "July1_4302FFx_132412S.xlsx"	,"Sept1_4255FFx_112451W.xlsx",
-  "July2_4300FFx_140029W.xlsx"	,"Sept1_4255FFx_133441S.xlsx",
-  "July2_4300FFx_150500S.xlsx")
 
-# paths = all_paths[grep("S", all_paths, value=F)]
-# euc.dist <- function(x1, x2) sqrt(sum((x1 - x2) ^ 2, na.rm = T))
+all_paths = list.files(pattern = '[SW].xlsx')
+all_paths = sort(all_paths); all_paths = all_paths[-c(1, 2)] #august doesnt have reliable scores
+
 get_cor = function(x1, x2){
-  return(cor(x1, x2))
+  return(cor(x1, x2, "complete.obs"))
 }
-get_results = function(x, data, labels, rmcell) {
+get_results = function(x, my_data, labels) {
   
   # method for doing the analysis on an xlsx file
   time_cutoff = unlist(x[1])
   thresh = unlist(x[2])
-  Time = unname(unlist(data[,1]))
-  cells = select(data, -1)
-  cells = as.data.frame(apply(cells, 2, as.numeric))
-  cells = drop_na(cells)
-  cells = cells[, -rmcell]
+  Time = unname(unlist(my_data[,1]))
+  cells = select(my_data, -1)
+  #cells = as.data.frame(apply(cells, 2, as.numeric))
+  #cells = drop_na(cells)
+  #cells = cells[, -rmcell]
   get_area = function(col){
-    my_min = min(col, na.rm = T)
-    col = col - my_min
-    my_max = max(col, na.rm = T)
+    #my_min = min(col, na.rm = T)
+    #col = col - my_min
+    #my_max = max(col, na.rm = T)
     #max_amp = stats[5]
-    col = col / my_max
     baseline = median(unlist(col))   # get median of all cell data
     variance = mad(unlist(col))  
-    all_spike_locations = (col > thresh*variance + baseline)
+    threshold_line = baseline + thresh*variance
+    col = col - threshold_line
+    #col = col / my_max
+    
+    all_spike_locations = (col > 0)
     ## method from https://masterr.org/r/how-to-find-consecutive-repeats-in-r/
     rle.all_spike_locations = rle(as.numeric(all_spike_locations))
     myruns = which(rle.all_spike_locations$values == TRUE & rle.all_spike_locations$lengths >= time_cutoff)
@@ -62,22 +49,43 @@ get_results = function(x, data, labels, rmcell) {
     
   }
   results = sapply(as.data.frame(cells), get_area )
+
   results = as.numeric(unname(unlist(results)))
-  x = get_cor(labels, results)+1
+  #View(results)
+  #View(labels)
+  x = get_cor(labels, results)+1 #add one to keep numbers (0, 1)
   return(-1*x)
 }
 
+
+labels = lapply(all_paths, function(str){
+  labels <- read_excel(str, sheet = 2)
+  labels = as.data.frame(apply(labels, 2, as.numeric))
+  #rmcell = which(is.na(labels))
+  
+  #labels = labels[-rmcell,]
+
+})
+all_data = lapply(all_paths, function(str){
+   return(as_tibble(read_excel(str, skip = 1)))
+})
+
 dummy = function(x){
   score = foreach(i=1:length(all_paths), .combine = '+') %dopar% {
-    labels <- read_excel(all_paths[i], sheet = 2)
-    labels = as.data.frame(apply(labels, 2, as.numeric))
-    rmcell = which(is.na(labels))
-
-    labels = labels[-rmcell,]
-    data = read_excel(all_paths[i], skip = 1 )
-    get_results(x, data, labels, rmcell)
+    score = get_results(x, all_data[[i]], labels[[i]] )
+    if(!is.na(score)){
+      return(score)
+      }
+    else{
+          return(0)
+    }
   }
   return(score/length(all_paths))
 }
 levels <- list(time_cutoff = seq(15, 32, by=1), thresh = seq(2, 4, by= 0.5))
 res <- gridSearch(dummy, levels)
+
+
+
+
+
