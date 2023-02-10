@@ -7,37 +7,43 @@ options(shiny.maxRequestSize = 100*1024^2)
 shinyServer(function(input,output, session) {
 
   
-  rm_cells = function(string){
-    rmcells = str_replace_all(string, " ", "")  #cleans string specifying which cells to remove
-    rmcells = as.numeric(strsplit(rmcells, ",")[[1]])
-    rmcells = unique(rmcells)
-  }
+#  rm_cells = function(string){
+#    rmcells = str_replace_all(string, " ", "")  #cleans string specifying which cells to remove
+#    rmcells = as.numeric(strsplit(rmcells, ",")[[1]])
+#    rmcells = unique(rmcells)
+#  }
   
 
   gather_across_files = function(){
-    max_file_idx = grep("[Mm][Aa][xX]", input$file$name, perl = T, value = F) #which file in uploads is max
-    validate(need(length(max_file_idx)==1, "Please upload a single file with max values for each cell" ))  #make sure data has equal cols
-    files = input$file$name[-max_file_idx] #remove max files from "files"
-    usable_input_file_idx = which(input$file$name %in% files) 
-    len = length(usable_input_file_idx)
-    data =  read_excel(path = input$file$datapath[ usable_input_file_idx[1]], skip = 1, trim_ws = TRUE)  # read the first file
+    # max_file_idx = grep("[Mm][Aa][xX]", input$file$name, perl = T, value = F) #which file in uploads is max
+    # validate(need(length(max_file_idx)==1, "Please upload a single file with max values for each cell" ))  #make sure data has equal cols
+    # files = input$file$name[-max_file_idx] #remove max files from "files"
+    # usable_input_file_idx = which(input$file$name %in% files) 
+    files = input$file$name
+    len = length(files) # number of files uploaded
+    data =  read_excel(path = input$file$datapath[1], skip = 1, trim_ws = TRUE)  # read the first file
     ncols = length(data)
-    updateSliderInput(session, "num", max = ncols-1)
+    updateSliderInput(session, "num", max = ncols-2)
     med_devs = apply(data[,-1], 2, get_median_devs)
-    
+    cell_maxs = apply(data[,-1], 2, max)
     if (len > 1){        #if there are multiple files being uploaded:
-      for (i in usable_input_file_idx[-1]){
+      for (i in (len-1)){
+          print( input$file$datapath[i])
           local_data = read_excel(path = input$file$datapath[i], skip = 1, trim_ws = TRUE)
           validate(need(ncols == length(local_data), "Please Select Files with the same number of columns" ))  #make sure data has equal cols
           ncols = length(local_data)
           local_med_devs = apply(local_data[,-1], 2, get_median_devs)
+          local_cell_maxs = apply(local_data[,-1], 2, max)
           med_devs =  rbind(med_devs, local_med_devs)
-
+          cell_maxs =  rbind(cell_maxs, local_cell_maxs)
+          
       }
     }
+    cell_maxs = apply(cell_maxs, 2, max)
+    View(cell_maxs)
     mad_across_repeats = apply(med_devs, 2, median)
-    max = read_excel(input$file$datapath[max_file_idx])
-    cell_maxs = as.numeric(max)
+    #max = read_excel(input$file$datapath[max_file_idx])
+    #cell_maxs = as.numeric(max)
     validate(need(ncols-1 == length(cell_maxs), "Please make sure max file has same #cells as all data files" ))  #make sure data has equal cols
     validate(need(is.numeric(cell_maxs), "Please make sure max file is numeric" ))
     stats_across_recordings = rbind(cell_maxs, mad_across_repeats)
@@ -55,8 +61,8 @@ shinyServer(function(input,output, session) {
     data = drop_na(data)
     Time = unname(unlist(data[,1]))
     cells = select(data, -1)
-    rmcells = rm_cells(input$rmcells)
-    cells[,rmcells] = 0.0
+    #rmcells = rm_cells(input$rmcells)
+    #cells[,rmcells] = 0.0
     cell_stats = gather_across_files()  #get min, max, baseline and var from all files
     maxs = cell_stats[1,]
     mads = cell_stats[2,]
@@ -155,7 +161,7 @@ shinyServer(function(input,output, session) {
 
     results = mapply(get_area, as.data.frame(cells), maxs, mads)
     results = t(results)
-    results = as_tibble(results) %>% mutate(cell_id = row_number()) %>% select( cell_id, everything())
+    results = as_tibble(results) %>% mutate(cell_id = as.integer(row_number()-1)) %>% select( cell_id, everything())
     colnames(results) = c("cell_id", "avg_spike_area", "total_spike_area_per_time", "num_spikes", "max_spike_area", "longest_spike", "mean_rising_spike_duration", "mean_falling_spike_duration","threshold", "mean_exp_coeff")
     
     return(as_tibble(results))
@@ -167,14 +173,14 @@ shinyServer(function(input,output, session) {
     cell_stats = gather_across_files()
     maxs = cell_stats[1,]
     mads = cell_stats[2, ]
-    first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
-    if(is.finite(first_NA_row)){
-      data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
-    }
+    # first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
+    # if(is.finite(first_NA_row)){
+    #   data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
+    # }
     data = drop_na(data)
     cells = select(data, -1)
-    rmcells = rm_cells(input$rmcells)
-    cells[,rmcells] =0.0      #set cells labeled as rmcells to 0
+    #rmcells = rm_cells(input$rmcells)
+    #cells[,rmcells] =0.0      #set cells labeled as rmcells to 0
     Time = unname(unlist(data[,1]))
     
     
@@ -189,7 +195,7 @@ shinyServer(function(input,output, session) {
       return(col)
     }
     cell_out = mapply(helper, as.data.frame(cells), maxs, mads)
-    colnames(cell_out) = paste( "Cell", seq(1,dim(cell_out)[2]))
+    colnames(cell_out) = paste( "Cell", seq(0,(dim(cell_out)[2]-1)) )
     return(cell_out)
   }
   
@@ -252,9 +258,7 @@ shinyServer(function(input,output, session) {
       
     #loop through the sheets
     len = length(input$file$name)
-    max_file_idx = grep("[Mm][Aa][xX]", input$file$name, perl = T, value = F)
     for (i in 1:len){
-      if(input$file$datapath[i] != input$file$datapath[ max_file_idx] ){
       #write each sheet to a csv file, save the name
       trunc_name = rmv.ext(input$file$name[i])
       fileName1 = paste(trunc_name,"spike_stats.csv",sep = "_")
@@ -269,7 +273,7 @@ shinyServer(function(input,output, session) {
       files = c(fileName1,files)
       files = c(fileName2, files)
       incProgress(1/len, detail = paste("Processing file", i))
-      }
+      
     }
   })
     return(files)
@@ -289,9 +293,9 @@ shinyServer(function(input,output, session) {
     if(is.null(input$file)){return()}
     data = read_excel(path = input$file$datapath[input$file$name==input$Select], skip = 1, trim_ws = TRUE)
     first_NA_row = min(which(is.na(data), arr.ind = T)[, 1])  # first row with NA values, want to remove all rows after this one
-    if(is.finite(first_NA_row)){
-      data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
-    }
+    # if(is.finite(first_NA_row)){
+    #   data = data[1:(first_NA_row-1),]                        # removes all info after the first NA, needed for the sample files I got to test this on
+    # }
     data = drop_na(data)
 
     return(data)
@@ -308,13 +312,13 @@ shinyServer(function(input,output, session) {
     Time = data[, 1]
     data = data[, -1]
 
-    cell = unname(unlist(data[ ,input$num]))   #columns of data, user selected
+    cell = unname(unlist(data[ ,(input$num+1)]))   #columns of data, user selected
     baseline = median(cell)
-    variance = mads[input$num]
+    variance = mads[(input$num+1)]
     
     threshold_line = input$thresholdFactor*variance + baseline
     cell = cell - threshold_line
-    my_max = maxs[input$num]
+    my_max = maxs[(input$num+1)]
     cell = cell / my_max
 
     logical = as.logical(get_spike_inx(cell, baseline, variance))
