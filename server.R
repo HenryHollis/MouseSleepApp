@@ -40,7 +40,6 @@ shinyServer(function(input,output, session) {
       }
     }
     cell_maxs = apply(cell_maxs, 2, max)
-    View(cell_maxs)
     mad_across_repeats = apply(med_devs, 2, median)
     #max = read_excel(input$file$datapath[max_file_idx])
     #cell_maxs = as.numeric(max)
