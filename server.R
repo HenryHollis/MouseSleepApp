@@ -39,8 +39,12 @@ shinyServer(function(input,output, session) {
           
       }
     }
-    cell_maxs = apply(cell_maxs, 2, max)
-    mad_across_repeats = apply(med_devs, 2, median)
+    if(len >1 ){
+      cell_maxs = apply(cell_maxs, 2, max)
+      mad_across_repeats = apply(med_devs, 2, median)
+    }else{
+      mad_across_repeats = median(med_devs)
+    }
     #max = read_excel(input$file$datapath[max_file_idx])
     #cell_maxs = as.numeric(max)
     validate(need(ncols-1 == length(cell_maxs), "Please make sure max file has same #cells as all data files" ))  #make sure data has equal cols
